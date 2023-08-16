@@ -1,55 +1,129 @@
-import express from "express";
-import { db } from "../db.js";
+const express = require('express');
+const app = express();
+app.use(express.json());
+const { Posts, Users } = require('../database/mongooseInit');
 const router = express.Router();
 
-//api to get all the posts..
-router.get("/", (req,res) => {
-  let q = req.query.cat? "SELECT * FROM posts WHERE cat=?" : "SELECT * FROM posts";
-  db.query(q,[req.query.cat],(err,data)=>{
-    err?res.status(500).send(err):res.status(200).json(data);
-  });
+// API to get all the posts..
+router.get("/", async (req, res) => {
+  try {
+    const cat = req.query.cat;
+    const query = cat ? { cat: cat } : {};
+    const posts = await Posts.find(query);
+    res.status(200).json(posts);
+  } catch (err) {
+    res.status(500).send(err);
+  }
 });
 
-//api to get the post by ID...
-router.get("/:id", (req,res) => {
-  let postId = req.params.id;
-  let q ="SELECT * FROM posts WHERE id=?";
-  db.query(q, [postId], (err, data) => {
-    err?res.status(500).send(err):res.status(200).json(data[0]);
-  });
-});
-
-//api to add a new the post...
-router.post("/", (req, res) => {
-  let {title,desc,img,cat,date,uid}=req.body;
-    let q ="INSERT INTO posts(`title`, `desc`, `img`, `cat`, `date`,`uid`) VALUES (?)";
-    let values = [title,desc,img,cat,date,uid];
-    db.query(q, [values], (err,_) => {
-      err?res.status(500).send(err) : res.json("Post has been created.");
-    });
-  });
-
-//api to get username the post by ID...
-router.get("/username/:id", (req, res) => {
-  let postId = req.params.id;
-  let q = "SELECT users.username FROM posts JOIN users ON posts.uid = users.id WHERE posts.id=?";
-  db.query(q, [postId], (err, data) => {
-    if(err){res.status(500).send(err)}
-      if(data.length === 0){res.status(404).json({ error: "Post not found" });
-      }else{res.status(200).json(data)}
+// API to get the post by ID...
+router.get("/:id", async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const post = await Posts.findById(postId);
+    if (!post) {
+      res.status(404).json({ error: "Post not found" });
+    } else {
+      res.status(200).json(post);
     }
-  );
+  } catch (err) {
+    res.status(500).send(err);
+  }
 });
 
-//api to update the post comments by ID...
-router.put("/:id", (req,res) => {
-  let { resultString } = req.body;
-  let postId = req.params.id;
-  let q = "UPDATE POSTS SET `comments` = ? WHERE `id` = ?";
-  let values = [resultString,postId];
-    db.query(q, values, (err,_) => {
-      err?res.status(500).send(err) : res.json("Your Comment is added");
-    });
-  });
+// API to add a new post...
+router.post("/", async (req, res) => {
+  try {
+    const newPost = new Posts(req.body);
+    await newPost.save();
+    res.json("Post has been created.");
+  } catch (err) {
+    res.status(500).send(err);
+  }
+});
 
-export default router;
+// API to delete a post by ID
+router.delete("/:id", async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const deletedPost = await Posts.findByIdAndDelete(postId);
+    if (!deletedPost) {res.status(404).json({ error: "Post not found" })}
+    else {res.status(200).json({ message: "Post deleted successfully" })}
+  } catch (err) {res.status(500).send(err)}
+});
+
+// API to get username the post by ID...
+router.get("/username/:id", async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const post = await Posts.findById(postId);
+    if (!post) {
+      res.status(404).json({ error: "Post not found" });
+    } else {
+      res.status(200).json(post);
+    }
+  } catch (err) {
+    res.status(500).send(err);
+  }
+});
+
+// API to update the post comments by ID...
+router.put("/:id", async (req, res) => {
+  try {
+    const postId = req.params.id;
+    await Posts.findByIdAndUpdate(postId, { comments: req.body });
+    res.json("Your Comment is added");
+  } catch (err) {
+    res.status(500).send(err);
+  }
+});
+
+//API to register a new user
+router.post("/register", async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+
+    // Check if user already exists
+    const existingUser = await Users.findOne({ $or: [{ email: email }, { username: username }] });
+    if (existingUser) {
+      return res.status(409).json({ message: "User or email already exists!" });
+    }
+
+    const newUser = new Users({
+      username: username,
+      email: email,
+      password: password,
+    });
+
+    await newUser.save();
+    return res.status(200).json({ message: "Cheers!! Your account is created.." });
+  } catch (err) {
+    return res.status(500).json(err);
+  }
+});
+
+router.post("/login", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    const user = await Users.findOne({ username: username });
+    if (!user) {
+      return res.status(404).json("User not found!");
+    }
+
+    if (user.password === password) {
+      const { password: _, ...userData } = user.toObject();
+      return res.status(200).json(userData);
+    } else {
+      return res.status(400).json("Wrong username or password!");
+    }
+  } catch (err) {
+    return res.status(500).json(err);
+  }
+});
+
+router.post("/logout", (req, res) => {
+  res.clearCookie("access_token", { sameSite: "none", secure: true }).status(200).json("User is logged out.");
+});
+
+module.exports = router;
